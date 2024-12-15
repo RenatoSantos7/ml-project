@@ -1,0 +1,608 @@
+---
+title: "FRAGANCE"
+subtitle: "Modelo preditivo da avaliação de um perfume em parfumo.com"
+author: |
+        | Amanda Rodrigues Cunha^[<amanda.cunha@aluno.ufabc.edu.br>]
+        | Caio Cezar Veronezi Macedo^[<cezar.veronezi@aluno.ufabc.edu.br>]
+        | Renato dos Santos Silva^[<renato.santos@aluno.ufabc.edu.br>]
+        | Joao Victor Oliveira Correia de Brito^[<brito.joao@aluno.ufabc.edu.br>]
+        | Luis Guilherme Redigolo Crosselli^[<luis.crosselli@aluno.ufabc.edu.br>]
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+    pdf_document:
+        toc: false
+        toc_depth: 2
+        number_sections: true
+        latex_engine: xelatex
+header-includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+  - \usepackage{mathtools}
+params:
+  cache: true
+---
+
+```{r delete-cache, include = FALSE, eval = TRUE, cache = FALSE}
+unlink("project_cache", recursive = TRUE)
+unlink("project_files", recursive = TRUE)
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  fig.align = "center",
+  out.width = "90%",
+  out.heigth = "90%",
+  warning = FALSE,
+  message = FALSE,
+  collapse = FALSE,
+  eval = TRUE,
+  cache = TRUE,
+  clean = TRUE
+)
+options(width = 90)
+```
+
+```{r r-imports, include = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(tidyr)
+library(dplyr)
+library(readr)
+library(GGally)
+library(skimr)
+library(reticulate)
+library(naniar)
+library(visdat)
+library(gridExtra)
+library(patchwork)
+library(broom)
+library(xgboost)
+library(kernlab)
+library(knitr)
+
+use_python(".venv/bin")
+```
+
+ <!-- Blackboard letters -------------------------------------------------------------- -->
+\newcommand{\bA}{\ensuremath{\mathbb{A}}}
+\newcommand{\bB}{\ensuremath{\mathbb{B}}}
+\newcommand{\bC}{\ensuremath{\mathbb{C}}}
+\newcommand{\bD}{\ensuremath{\mathbb{D}}}
+\newcommand{\bE}{\ensuremath{\mathbb{E}}}
+\newcommand{\bF}{\ensuremath{\mathbb{F}}}
+\newcommand{\bG}{\ensuremath{\mathbb{G}}}
+\newcommand{\bH}{\ensuremath{\mathbb{H}}}
+\newcommand{\bI}{\ensuremath{\mathbb{I}}}
+\newcommand{\bJ}{\ensuremath{\mathbb{J}}}
+\newcommand{\bK}{\ensuremath{\mathbb{K}}}
+\newcommand{\bL}{\ensuremath{\mathbb{L}}}
+\newcommand{\bM}{\ensuremath{\mathbb{M}}}
+\newcommand{\bN}{\ensuremath{\mathbb{N}}}
+\newcommand{\bO}{\ensuremath{\mathbb{O}}}
+\newcommand{\bP}{\ensuremath{\mathbb{P}}}
+\newcommand{\bQ}{\ensuremath{\mathbb{Q}}}
+\newcommand{\bR}{\ensuremath{\mathbb{R}}}
+\newcommand{\bS}{\ensuremath{\mathbb{S}}}
+\newcommand{\bT}{\ensuremath{\mathbb{T}}}
+\newcommand{\bU}{\ensuremath{\mathbb{U}}}
+\newcommand{\bV}{\ensuremath{\mathbb{V}}}
+\newcommand{\bW}{\ensuremath{\mathbb{W}}}
+\newcommand{\bX}{\ensuremath{\mathbb{X}}}
+\newcommand{\bY}{\ensuremath{\mathbb{Y}}}
+\newcommand{\bZ}{\ensuremath{\mathbb{Z}}}
+
+# Introdução {#sec:intro}
+
+[Parfumo][parfumo] é um *website* que reúne conhecedores e entusiastas de fragâncias, organizando uma base de dados com pouco mais de 190 mil perfumes, criados por cerca de 12 mil marcas. Segundo palavras registradas na sua página inicial:
+
+> Parfumo is the home for all fragrance connoisseurs & enthusiasts!  
+> Discover new perfumes, organize your collection, connect with other fragrance lovers and much more!
+
+Ou seja, é também uma rede social em que os participantes compartilham opiniões em *forums* e registram suas avaliações sobre perfumes.
+
+Neste projeto, exploramos o conjunto de dados [The Scent of Data][the-scents-of-data] (`parfumo`), geradas a partir da base de dados do [parfumo.com][parfumo] e publicadas no [TidyTuesday][tidy-tuesday] (quinquagésima semana). Na sua [página de introdução][week50], encontramos algumas perguntas de partida:
+
+> Quais fatores mais influenciam a avaliação de um perfume?  
+> Há famílias de aromas específicas que dominam o mercado? Como são percebidas pelos usuários?  
+> A popularidade de certas certas notas de fragâncias mudou ao longo do tempo?
+
+A primeira exige uma abordagem de inferência, porquanto deseja-se encontrar a influência de certas características sobre a avaliação de um perfume. A terceira pede por uma análise exploratória. A segunda, porém, é passível de modelagem preditiva. Dadas certas características de um perfume, incluindo famílias olfativas, estamos interessados em prever sua avaliação. Tal modelo poderia ser usado, por exemplo, como instrumento para a projeção de aceitação de certo perfume em elaboração.
+
+
+# Análise e preparação dos dados {#sec:eda}
+
+```{r parfumo-dataset, include = FALSE}
+# Define the file path
+rds_file <- "parfumo_data_clean.rds"
+
+if (file.exists(rds_file)) {
+  # Load the dataset from the file
+  parfumo <- readRDS(rds_file)
+} else {
+  # Download the dataset
+  tuesdata <- tidytuesdayR::tt_load("2024", week = 50)
+  parfumo <- tuesdata$parfumo_data_clean
+
+  # Save it locally for future use
+  saveRDS(parfumo, rds_file)
+}
+```
+
+## Descrição dos dados
+
+A tabela abaixo lista as variáveis do conjunto de dados `parfumo`, junto de suas classes (R) e descrições:
+
+| Variável      | Classe      | Tipo     | Descrição                                                                      |
+|:--------------|:------------|:-------- |:--------------------------------------------------------------------------------|
+| Number        | character   | nominal  | Identificador único atribuído a cada perfume.                      |
+| Name          | character   | nominal  | Nome do perfume ou fragrância.                                                |
+| Brand         | character   | nominal  | Marca ou fabricante da fragrância.                                            |
+| Release_Year  | double      | discreta | Ano em que a fragrância foi lançada.                                          |
+| Concentration | character   | ordinal  | Concentração da fragrância.             |
+| Rating_Value  | double      | discreta | Pontuação geral atribuída pelos usuários.                                      |
+| Rating_Count  | double      | discreta | Número de avaliações de usuários para a fragrância.                           |
+| Main_Accords  | character   | nominal  | Principais características ou acordes olfativos da fragrância.               |
+| Top_Notes     | character   | nominal  | Notas iniciais percebidas logo após a aplicação.                             |
+| Middle_Notes  | character   | nominal  | Notas médias ou de coração da fragrância, que surgem após as notas de topo.  |
+| Base_Notes    | character   | nominal  | Notas finais e duradouras que permanecem após a fragrância secar.            |
+| Perfumers     | character   | nominal  | Criadores ou perfumistas responsáveis pela composição da fragrância.         |
+| URL           | character   | nominal  | Link para a página do produto no Parfumo.com.                                 |
+
+```{r data-type-exploration, echo = FALSE}
+vis_dat(parfumo)
+```
+
+## Análise de *missings* e *data cleaning*
+
+Primeiramente, vamos analisar os possíveis valores para as variáveis olfativas, ou seja, quantas notas distintas podem ocorrer em cada uma:
+
+```{r notes-analysis, echo = FALSE}
+# Define the function
+count_distinct_words <- function(df, col_name, separator = ",") {
+  df %>%
+    filter(!is.na(.data[[col_name]])) %>%  # Remove rows with missing values
+    separate_rows(!!sym(col_name), sep = separator) %>%  # Split into rows
+    mutate(!!sym(col_name) := trimws(.data[[col_name]])) %>%  # Trim whitespace
+    distinct(.data[[col_name]]) %>%  # Get unique values
+    nrow()  # Count the number of rows
+}
+
+# Apply the function to multiple columns
+count_distinct_words_for_columns <- function(df, col_names, separator = ",") {
+  sapply(col_names, function(col) count_distinct_words(df, col, separator))
+}
+
+columns <- c("Main_Accords", "Top_Notes", "Middle_Notes", "Base_Notes")
+
+notes_count <- count_distinct_words_for_columns(parfumo, columns)
+
+# Print the result
+knitr::kable(notes_count, format = "markdown",
+             col.names = c("Type", "#Notes"))
+```
+
+Com exceção de `Main_Accords`, com 22 notas de fragância, as variáveis olfativas possuem um domínio de notas na casa de $10^3$ possibilidades. Com isso, vamos restringir nosso modelo às características principais de cada perfume.
+
+O gráficos abaixo resumem a ocorrência de *missings* no conjunto de dados:
+
+```{r raw-missings-exploration, echo = FALSE}
+df_main_notes <- parfumo %>%
+  select(-Top_Notes, -Middle_Notes, -Base_Notes)
+
+vis_miss(df_main_notes)
+
+# gg_miss_var(df_main_notes)
+```
+
+Note que `Main_Accords` ocorre apenas em 54% dos dados. Além disso, `Concentration` está ausente em 79% deles, e `Perfumers` em 65%. Apenas `Release_Year`, `Rating_Count`, `Rating_Value` e `Brand` possuem presença que talvez não seja limitante à `Main_Notes` (Note que `Number` é irrelevante).
+
+Vamos usar `Name`, `Brand` e `URL` como chave primária, e filtrar `Concentration` e `Perfumers` dos dados. (Lembrando que `Brand` possui domínio da ordem de $10^3$ possibilidades, vamos ignorá-la porquanto pode fragmentar excessivamente os dados):
+
+```{r primary-key, echo = FALSE}
+df_primary_key <- df_main_notes %>%
+  unite(temp_key, Name, Brand, URL, sep = "_", remove = FALSE) %>%
+  mutate(id = dense_rank(temp_key)) %>%
+  select(-temp_key, -Name, -URL, -Brand, -Concentration, -Perfumers)
+```
+
+Agora, temos o seguinte gráfico de *missings*:
+
+```{r filtered-missings-exploration, echo = FALSE}
+df_filtered <- df_primary_key %>%
+  select(id, Rating_Value, Rating_Count,
+         Release_Year, Main_Accords)
+
+vis_miss(df_filtered)
+
+# grid.arrange(vis_miss(df_filtered),
+#              gg_miss_var(df_filtered),
+#              ncol = 2)
+```
+
+<!-- O gráfico abaixo mostra o impacto de manter ou não `Release_Year` sobre a porcentagem de *missings* no conjunto de dados: -->
+
+```{r another-plot, echo = FALSE, include = FALSE}
+# Calculate percentages for the original data
+missing_data_original <- df_filtered %>%
+  summarise(
+    total_rows = n(),
+    missing_rows = sum(complete.cases(.)),
+    missing_percent = 100 * (total_rows - missing_rows) / total_rows,
+    complete_percent = 100 * missing_rows / total_rows
+  )
+
+# Calculate percentages for the data without release_year
+df_modified <- df_filtered %>% select(-Release_Year)
+missing_data_modified <- df_modified %>%
+  summarise(
+    total_rows = n(),
+    missing_rows = sum(complete.cases(.)),
+    missing_percent = 100 * (total_rows - missing_rows) / total_rows,
+    complete_percent = 100 * missing_rows / total_rows
+  )
+
+# Combine both datasets into one for plotting
+plot_data <- data.frame(
+  dataset = c("With Release_Year", "With Release_Year",
+              "Without Release_Year", "Without Release_Year"),
+  status = c("With Missing", "Without Missing",
+             "With Missing", "Without Missing"),
+  percentage = c(
+    missing_data_original$missing_percent,
+    missing_data_original$complete_percent,
+    missing_data_modified$missing_percent,
+    missing_data_modified$complete_percent
+  )
+)
+
+# Create a grouped bar plot
+ggplot(plot_data, aes(x = dataset, y = percentage, fill = status)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Impact of Removing Release_Year on Missing Data Percentage",
+    x = "Cleaned Dataset",
+    y = "Percentage"
+  ) +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+```
+
+<!-- As barras vermelhas indicam a porcentagem dos dados que incluem algum valor desconhecido, enquanto as azuis indicam a porcentagem de observações completas. Note que há um ganho de aproximadamente 10% no volume de dados caso removamos `Release_Year`. -->
+
+Vamos alterar `Release_Year` para `Years_Older` por ser mais intuitivo:
+
+```{r year-older}
+df_years <- df_cleaned %>%
+  mutate(Years_Older = as.integer(format(Sys.Date(), "%Y")) - Release_Year) %>%
+  select(-Release_Year)
+```
+
+Ao filtrarmos os *missings* e transformarmos `Main_Accords` desdobrando-a em variáveis binárias, uma para cada nota olfativa via *one-hot encoding*, temos o seguinte resultado resumido:
+
+```{r input-table, echo = FALSE}
+df_cleaned <- df_filtered %>%
+  drop_na()
+```
+
+
+```{r one-hot-encoding, echo = FALSE}
+encode_column <- function(df, col_name, count_suffix = NULL, prefix = NULL) {
+  count_suffix <- count_suffix %||% "_Count" # Use the provided suffix or default to _Count
+
+  prefix <- prefix %||% paste0(col_name, "_")  # Use the provided prefix or default to col_name_
+
+  # Add a count column for the number of items in the delimited string
+  count_column <- paste0(prefix, count_suffix)
+  df_with_count <- df %>%
+    mutate(
+      !!count_column := str_count(.data[[col_name]], ",") + 1
+    )
+
+  # Process the column for binary encoding
+  wide_encoded <- df_with_count %>%
+    separate_rows(.data[[col_name]], sep = ",") %>%  # Split words into rows
+    mutate(
+      !!sym(col_name) := trimws(.data[[col_name]])  # Trim whitespace after splitting
+    ) %>%
+    mutate(value = 1) %>%  # Add presence indicator
+    group_by(id, .data[[col_name]]) %>%  # Group by id and word
+    summarise(value = max(value), .groups = "drop") %>%  # Ensure one entry per id-word combination
+    pivot_wider(
+      names_from = .data[[col_name]],  # Pivot to wide
+      values_from = value,
+      values_fill = list(value = 0),
+      names_prefix = prefix  # Use the custom prefix
+    )
+
+  # Merge the encoded data and the original data (with the count column preserved)
+  df_final <- left_join(wide_encoded, df_with_count, by = "id")
+
+  return(df_final %>% select(-Main_Accords))
+}
+
+# Apply the encoding function to each column
+input_table <- df_years %>%
+  encode_column("Main_Accords", prefix = "Note_", count_suffix = "Count")
+
+skim(input_table)
+```
+
+Agora, vamos realizar uma regressão linear para verificar a importância das variáveis:
+
+```{r linear-regression}
+data <- input_table %>%
+  select(-id)
+
+linear_model <- lm(Rating_Value ~ ., data = data)
+print(tidy(linear_model), n = Inf)
+```
+
+
+# Modelagem {#sec:modelling}
+
+Nosso objetivo é encontrar $\hat{y} \coloneqq f(X) + \epsilon$, em que $\hat{y}$ é a predição para $y \in [0, 10] \subseteq \bR$, a avaliação de um perfume. Logo, temos um problema de **regressão**. Para isso, vamos usar **Elastic Net**, **Gradient Boosting** e **Support Vector Machines**.
+
+Para reproducibilidade, vamos fixar a semente usada para geração de números pseudoaleatórios:
+
+```{r seed}
+seed <- 42
+set.seed(seed)
+```
+
+Os dados são divididos em conjuntos de treinamento e teste com:
+
+```{r data-split}
+data <- input_table %>%
+  select(-id)
+
+data_split <- initial_split(data, prop = 0.8)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+```
+
+Os dados precisam ser normalizados. Neste caso, apenas as variáveis numéricas não binárias:
+
+```{r preprocessing}
+recipe_spec <- recipe(Rating_Value ~ ., data = data) %>%
+  # step_normalize(Rating_Count, Years_Older, Note_Count)
+  step_normalize(all_predictors())
+```
+
+Para comparação, usamos o modelos **Naive Mean** e **Naive Median**, dados a seguir:
+
+```{r naive-models}
+# Calculate naive mean
+naive_mean <- train_data %>%
+  summarise(naive_mean = mean(Rating_Value))
+
+print(naive_mean)
+
+# Calculate naive median
+naive_median <- train_data %>%
+  summarise(naive_median = median(Rating_Value))
+
+print(naive_median)
+```
+
+```{r naive-rmse}
+rmse_mean <- test_data %>%
+  summarise(rmse_mean = sqrt(mean((Rating_Value - naive_mean$naive_mean)^2)))
+
+# Calculate RMSE for naive median model
+rmse_median <- test_data %>%
+  summarise(rmse_median = sqrt(mean((Rating_Value - naive_median$naive_median)^2)))
+
+print(rmse_mean)
+print(rmse_median)
+```
+
+## Elastic Net
+
+O primeiro candidato é uma combinação entre a Regressão Lasso e a Regressão Ridge. De fato, o parâmetro `mixture`, que toma valores entre zero e um, indica o quão perto o Elastic Net está dentre esses dois modelos, sendo mais perto de 1, mais próximo do Lasso. O parâmetro de penalidade (`penalty`) controla o quão forte impomos a regularização, em que valores mais altos levam a modelos mais restritivos, potencialmente mais simples.
+
+```{r elastic-net-spec}
+elastic_net_spec <- 
+  linear_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("regression")
+```
+
+```{r elastic-net-workflow}
+workflow_spec <- workflow() %>%
+  add_recipe(recipe_spec) %>%
+  add_model(elastic_net_spec)
+```
+
+```{r elastic-net-hyperopt}
+# Define a grid of hyperparameters to tune
+grid_spec <- grid_regular(
+  penalty(range = c(-5, 5)),    # Range for lambda (penalty)
+  mixture(range = c(0, 1)),      # Range for alpha (mixture)
+  levels = 10                    # 5 levels for each parameter
+)
+
+# Perform cross-validation for hyperparameter tuning
+cv_folds <- vfold_cv(train_data, v = 5)  # 5-fold cross-validation
+
+# Tune the model using the grid of hyperparameters
+tuned_results <- tune_grid(
+  workflow_spec,
+  resamples = cv_folds,
+  grid = grid_spec,
+  metrics = metric_set(rmse)
+)
+```
+
+```{r elastic-net-evaluation}
+# View the best hyperparameters
+best_params <- tuned_results %>%
+  select_best()
+
+print(best_params)
+
+# Finalize the workflow with the best parameters
+final_workflow <- workflow_spec %>%
+  finalize_workflow(best_params)
+
+# Fit the final model on the full training data
+final_model <- fit(final_workflow, data = train_data)
+
+# Evaluate the model on the test set
+test_results <- predict(final_model, test_data) %>%
+  bind_cols(test_data %>% select(Rating_Value)) %>%
+  metrics(truth = Rating_Value, estimate = .pred)
+
+print(test_results)
+```
+
+
+## Gradient Boosting
+
+Como segundo candidato, temos um modelo de *boosting* baseado em árvores. Sua flexibilidade é determinada pelo número de árvores, taxa de aprendizado, profundidade, número mínimo de observações por folha e uma redução mínima na função de perda para realizar um novo corte.
+
+```{r boosting-spec}
+# Define the Gradient Boosting model specification
+boosting_spec <- boost_tree(
+  trees = tune(),          # Number of trees
+  learn_rate = tune(),     # Learning rate
+  tree_depth = tune(),     # Maximum tree depth
+  min_n = tune(),          # Minimum number of observations in a node
+  loss_reduction = tune()  # Minimum loss reduction (gamma in xgboost)
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+```
+
+```{r boosting-workflow}
+# Define the workflow
+workflow_spec <- workflow() %>%
+  add_recipe(recipe_spec) %>%
+  add_model(boosting_spec)
+```
+
+```{r boosting-hyperopt}
+# Define a grid of hyperparameters to tune
+grid_spec <- grid_random(
+  trees(range = c(50, 500)),            # Number of trees
+  learn_rate(range = c(0.01, 0.3)),    # Learning rate
+  tree_depth(range = c(3, 10)),        # Maximum tree depth
+  min_n(range = c(2, 20)),             # Minimum number of observations in a node
+  loss_reduction(range = c(0, 10)),    # Minimum loss reduction
+  size = 10                            # Number of random combinations
+)
+
+# Create cross-validation folds
+cv_folds <- vfold_cv(train_data, v = 5)  # 5-fold cross-validation
+
+# Tune the model using the hyperparameter grid
+tuned_results <- tune_grid(
+  workflow_spec,
+  resamples = cv_folds,
+  grid = grid_spec,
+  metrics = metric_set(rmse)  # Use RMSE as the evaluation metric
+)
+
+# View the tuning results
+tuned_results
+```
+
+```{r boosting-evaluation}
+# View the best hyperparameters
+best_params <- tuned_results %>%
+  select_best()
+
+print(best_params)
+
+# Finalize the workflow with the best parameters
+final_workflow <- workflow_spec %>%
+  finalize_workflow(best_params)
+
+# Fit the final model on the full training data
+final_model <- fit(final_workflow, data = train_data)
+
+# Evaluate the model on the test set
+test_results <- predict(final_model, test_data) %>%
+  bind_cols(test_data %>% select(Rating_Value)) %>%
+  metrics(truth = Rating_Value, estimate = .pred)
+
+print(test_results)
+```
+
+## Support Vector Machines
+
+Agora, usamos **SVM** para regressão. Os hiperparâmetros são `cost` e `rbf_sigma`: no primeiro caso, temos um parâmetro de penalização, em que valores mais baixos levam a um modelo mais permissivo a erros, porém mais simples e de menor risco a *overfitting*; no segundo caso, temos um parâmetro do kernel gaussiano, *radial base function*, em que valores mais altos dão mais importância a pontos mais distantes.
+
+```{r svm-spec}
+# Define the SVM model specification
+svm_spec <- svm_rbf(
+  cost = tune(),   # Cost (regularization parameter)
+  rbf_sigma = tune() # Sigma (kernel parameter for RBF)
+) %>%
+  set_engine("kernlab") %>%
+  set_mode("regression")
+```
+
+```{r svm-workflow}
+# Define the workflow
+workflow_spec <- workflow() %>%
+  add_recipe(recipe_spec) %>%
+  add_model(svm_spec)
+```
+
+```{r svm-hyperopt}
+# Define a grid of hyperparameters to tune
+grid_spec <- grid_regular(
+  cost(range = c(-2, 2)),     # Cost range (log scale)
+  rbf_sigma(range = c(-2, 2)), # Sigma range (log scale)
+  levels = 5                  # Number of levels for each parameter
+)
+
+# Create cross-validation folds
+cv_folds <- vfold_cv(train_data, v = 5)  # 5-fold cross-validation
+
+# Tune the model using the hyperparameter grid
+tuned_results <- tune_grid(
+  workflow_spec,
+  resamples = cv_folds,
+  grid = grid_spec,
+  metrics = metric_set(rmse)  # Use RMSE as the evaluation metric
+)
+
+# View the tuning results
+tuned_results
+```
+
+```{r svm-evaluation}
+# View the best hyperparameters
+best_params <- tuned_results %>%
+  select_best()
+
+print(best_params)
+
+# Finalize the workflow with the best parameters
+final_workflow <- workflow_spec %>%
+  finalize_workflow(best_params)
+
+# Fit the final model on the full training data
+final_model <- fit(final_workflow, data = train_data)
+
+# Evaluate the model on the test set
+test_results <- predict(final_model, test_data) %>%
+  bind_cols(test_data %>% select(Rating_Value)) %>%
+  metrics(truth = Rating_Value, estimate = .pred)
+
+print(test_results)
+```
+
+
+# Análise dos resultados e conclusões {#sec:results}
+
+Os três modelos apresentaram um RMSE maior do que os preditores Média e Mediana, e tiverem um desempenho semelhante entre si. Apesar disso, não tivemos um ganho expressivo.
+
+
+[parfumo]: https://www.parfumo.com/
+[the-scents-of-data]: https://github.com/rfordatascience/tidytuesday/tree/main/data/2024/2024-12-10
+[tidy-tuesday]: https://github.com/rfordatascience/tidytuesday/
+[week50]: https://github.com/rfordatascience/tidytuesday/blob/main/data/2024/2024-12-10/readme.md
