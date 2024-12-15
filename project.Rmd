@@ -15,10 +15,10 @@ output:
         number_sections: true
         latex_engine: xelatex
 header-includes:
+  - \usepackage{mathtools}
   - \usepackage{amsmath}
   - \usepackage{amssymb}
   - \usepackage{amsthm}
-  - \usepackage{mathtools}
 params:
   cache: true
 ---
@@ -342,7 +342,7 @@ print(tidy(linear_model), n = Inf)
 
 # Modelagem {#sec:modelling}
 
-Nosso objetivo é encontrar $\hat{y} \coloneqq f(X) + \epsilon$, em que $\hat{y}$ é a predição para $y \in [0, 10] \subseteq \bR$, a avaliação de um perfume. Logo, temos um problema de **regressão**. Para isso, vamos usar **Elastic Net**, **Gradient Boosting** e **Support Vector Machines**.
+Nosso objetivo é encontrar $\hat{y} \coloneqq f(X) + \epsilon$, em que $\hat{y}$ é a predição para $y \in [0, 10] \subseteq \bR$, a avaliação de um perfume. Logo, temos um problema de **regressão**. Para isso, vamos usar **Elastic Net**, **Gradient Boosting** e **Support Vector Machines**. Usamos *cross-validation* para a escolhe dos hiperparâmetros de cada modelo.
 
 Para reproducibilidade, vamos fixar a semente usada para geração de números pseudoaleatórios:
 
@@ -362,7 +362,7 @@ train_data <- training(data_split)
 test_data <- testing(data_split)
 ```
 
-Os dados precisam ser normalizados. Neste caso, apenas as variáveis numéricas não binárias:
+Os dados precisam ser normalizados:
 
 ```{r preprocessing}
 recipe_spec <- recipe(Rating_Value ~ ., data = data) %>%
@@ -599,7 +599,7 @@ print(test_results)
 
 # Análise dos resultados e conclusões {#sec:results}
 
-Os três modelos apresentaram um RMSE maior do que os preditores Média e Mediana, e tiverem um desempenho semelhante entre si. Apesar disso, não tivemos um ganho expressivo.
+Os três modelos apresentaram um RMSE menor do que os preditores Média e Mediana, e tiverem um desempenho semelhante entre si. Apesar disso, não tivemos um ganho expressivo. Por conta de o problema ser de alta dimensionalidade, os resultados tomaram pouco menos de três horas para finalizarem, com peso maior sobre o SVM. Embora não tenhamos realizado neste trabalho, a inclusão de técnicas para a redução da dimensão do problema pode talvez levar a uma redução adicional do RMSE. Tal possibilidade é sugerida para trabalhos futuros.
 
 
 [parfumo]: https://www.parfumo.com/
